@@ -22,7 +22,7 @@ import System.Environment
 import Submitron
 
 --refine
-cref = 0.9
+cref = 0.2
 --prior beta
 pb  = 210
 -- errordriven alpha-
@@ -165,7 +165,7 @@ objects = ["a","b","c","d"]--,"e"]
 
 type Node = ([Clause],[Clause])
 
-
+{-
 main = do
 --	let 	erds =  [0,0.25,0.75,1]::[Double]
 --		bufs =  [0,3,6] :: [Int]
@@ -177,17 +177,21 @@ main = do
 	let averag =  (fromIntegral $ sum out) / (fromIntegral $ length out)
 	putStrLn.show $ averag
 	return averag
+-}
 
+--mainish buffersize erd = do
 
-mainish buffersize erd = do
-
---main = do
+main = do
+	[arg1,arg2] <- getArgs
+	let	buffersize = read arg1 ::Int
+		erd = read arg2 ::Double
+	
+	sequence $ replicate 100 $ mainsb buffersize erd
+mainsb buffersize erd=  do
 --	traceIO.show$ (buffersize,erd)
 	writeIORef counter 0
 	let 	numParticles = 3
-		temp = 10
---		buffersize = 1
---		erd = 1
+		temp = 2
 		initseed = ( [], [ f"t" [a o , a"o"]:-[]| o<-objects])
 		notEmpty x = do
 					x' <- readIORef x
@@ -197,7 +201,7 @@ mainish buffersize erd = do
 	history <- newIORef []
 	let	notConverged = do
 					ns' <- readIORef nodula
-					return $not $ any (\x-> (posterior' observed x)  >= 3e-5 ) ns' 
+					return $not $ any (\x-> (likelihood' observed x)  == 1 ) ns' 
 	whileM_ (notConverged) $ do
 		c <- readIORef counter
 		writeIORef counter c   
@@ -230,6 +234,7 @@ mainish buffersize erd = do
 									e'  = log $posterior buffer a'
 									acc = if e' > e then 1 else exp ( ( e'  - e) / temp ) 
 						survivors = map (\(a,a',acc) -> acceptancerule a a' acc )  allofthat
+					print$ survivors
 					writeIORef nodula survivors
 	ns' <- readIORef nodula
 	hs' <- readIORef history
@@ -261,43 +266,6 @@ progeny nodulus@(theory,tt) obs history = do
 assignment2rule (o1,t) = f"t"[a o1, a t]:-[]
 types2rule (t,t',i) = f"i"[v"X", v"Y",a i]:-[ f"t"[v"X",a t] , f"t"[v"Y",a t']]
 isAlso t' t  = f"t" [v"X",a t]:- [f"t"[v"X",a t']] 
-
-test1 = let 
-		node = ([types2rule ("a1","o","attract")], (map assignment2rule [("a","o"),("b","o")])++["a1" `isAlso` "o"])
-		obs  =  f"i" [a "b",a"a",a "attract"]
-	in do 
-		traceIO.show $ (node,obs)
-		traceIO  "\n"
-		--traceIO.show $ tier1 node obs
-
-test3 = let 
-		node = ([]::[Clause], (map assignment2rule [("a","o"),("b","o")]))
-		obs  =  f"i" [a "b",a"a",a "attract"]
-	in do 
-		traceIO.show $ (node,obs)
-		traceIO  "\n"
-
-		--traceIO.show $ tier3 node obs
-
-
-test3' = let 
-		node = ([types2rule ("o","o","attract")], (map assignment2rule [("a","a1"),("b","a2")])++["a1" `isAlso` "o", "a2" `isAlso` "o"])
-		obs  =  f"i" [a "b",a"a",a "attract"]
-	in do 
-		--traceIO.show $ (node,obs)
-		traceIO  "\n"
-		--traceIO.show $ tier3 node obs
-
-
-test2 = let 	node::Node
-		node = ([], (map assignment2rule [("a","o"),("b","o")])++["a1" `isAlso` "o","a2" `isAlso` "o"])
-		obs  =  f"i" [a "b",a"a",a "attract"]
-	in do 
-		traceIO.show $ (node,obs)
-		traceIO  "\n"
-		--traceIO.show $ tier2 node obs
-
-
 
 
 
@@ -392,7 +360,7 @@ tier2 erd nodulus@(theory,tt) obs =  do
 					else randomdriven'
 		randomdriven' = do
 			candidate  	<- refine [o1,o2] tt
-			if null candidate	then return []
+			if null candidate	then return []--[nodulus]
 					else do
 						let out  = advancedFalconry (erzi candidate)
 						if null out  then randomdriven' else return  out
@@ -412,7 +380,7 @@ tier2 erd nodulus@(theory,tt) obs =  do
 rethe :: Node -> [Term] -> IO Node
 rethe nodulus@(theory,tt) history = do
         let     interactions    = nub$ [i | (_,_,i) <- (map extractor history)]
-                types           = nub "o":[t| (_:-[Function _ [_,Function t _]]) <- tt]
+                types           = nub "o":[t| (Function _ [_,Function t _]:-[]) <- tt]
         theery <- runRVar (Data.Random.shuffle theory) StdRandom
         theory' <- geo theery interactions types
 	tt' <- refine objects tt
