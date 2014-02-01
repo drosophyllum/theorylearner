@@ -186,7 +186,7 @@ main = do
 	let	buffersize = read arg1 ::Int
 		erd = read arg2 ::Double
 	
-	sequence $ replicate 100 $ mainsb buffersize erd
+	sequence $ replicate 1000 $ mainsb buffersize erd
 
 mainsb buffersize erd=  do
 --	traceIO.show$ (buffersize,erd)
