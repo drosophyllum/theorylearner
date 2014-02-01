@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 module Main where
+import Prolog
 import Data.Maybe
 import Data.List hiding (find)
 import qualified Data.List (find)
@@ -20,6 +21,8 @@ import Control.Monad.State
 import System.IO.Unsafe
 import System.Environment
 import Submitron
+import Control.Concurrent
+import Control.Concurrent.MVar
 
 --refine
 cref = 0.2
@@ -30,121 +33,9 @@ calpha = 0.1
 
 
 
-counter = unsafePerformIO (newIORef 0)
-tick val = unsafePerformIO $ do
-	modifyIORef counter (+1)
-	return val
+tick c  = modifyIORef c (+1)
 
 d  x = trace (show x) x
-
-infix 6 :-
-
-data Term = Var String Int  
-	| Function String [Term]
-	deriving (Ord,Eq,Data,Typeable)
-instance Show Term where
-	show (Var s _) = s
-	show (Function s ts)  
-			| [] <- ts = s
-			|otherwise = s  ++ "(" ++ (intercalate "," (map show ts)) ++ ")" 
-
-data Clause = Term :- [Term]
-	deriving (Eq,Data,Typeable)
-clauseHead (h :- b) = h
-clauseBody (h :- b) = b
-instance Show Clause where
-	show (s :- ss)
-			| [] <- ss  = (show s ) ++ ".\n"
- 			| otherwise = show s  ++ " :- " ++ (intercalate " , " (map show ss)) ++ ".\n"
-type Substitution = [(Term,Term)]
-apply :: Substitution -> [Term] -> [Term]
-apply s ts = everywhere (mkT (apply' s)) ts
-apply' :: Substitution -> Term -> Term
-apply' ((v,v'):s) var 
-	| v == var 	= apply' s v'
-	| otherwise 	= apply' s var
-apply' _ x 		= x
-
-
-unify :: Term -> Term -> Maybe Substitution
-unify v@(Var _ _) t = Just [(v,t)]
-unify t v@(Var _ _) = Just [(v,t)]
-unify (Function x xs) (Function y ys)
-	| similar 	= (liftM concat) $ mapM (uncurry unify) (zip xs ys)
-	| otherwise 	= Nothing
-	where similar = (x==y) && (length xs == length ys)
-
-prove :: [Clause] -> [Term] -> Substitution
-prove rules goals = concat substit
-	where substit = find rules 1 goals
-
-find :: [Clause]-> Int -> [Term] -> [Substitution]
-find rules i [] = []
-find rules i goals = do 
-	let rules' = rename rules i 
-	(s,goals') <- branch rules' goals
-	return $ case goals' of
-			[] -> s
-			(x:xs) -> do
-				solution <- find rules (i+1) goals'
-				(s++solution)
-
-branch :: [Clause] -> [Term] -> [(Substitution,[Term])]
-branch rules g@(goal:goals) = do 
-	head :- body <- rules
-	s<- maybeToList $ unify goal head
-	return $(s::Substitution, apply s (body ++ goals))
-
-
-rename:: [Clause] -> Int -> [Clause]
-rename rules i =  everywhere (mkT renameVar) rules  -- rename vairables everywhere in rules
-        where
-                renameVar (Var s _)             = Var s i       -- Tranform vars
-                renameVar x                     = x             -- Do not transform non-vars
-
-
-
-
-
-prover :: [Clause] -> [Term] -> (Substitution,[Clause])
-prover rules goals = (concat (map fst substit),assym)
-	where 	substit = find' rules 1 goals
-		rules'  = concat [sym rl  | rl<-rules] 
-		sym rl
-			| (Function "i" [x,y,i] :- [t1,t2] ) <- rl = [rl,Function "i" [y,x,i]:- [t2,t1]]
-			| otherwise = [rl]
-		assym = [desym (head$ rename [rl]0) |  rl<- (map snd substit)]
-		desym rl 
-			|rl `elem` rules = rl
-			| (Function "i" [y,x,i] :- [t1,t2] ) <- rl = Function "i" [x,y,i] :- [t2,t1]
-
-find' :: [Clause]-> Int -> [Term] -> [(Substitution,Clause)]
-find' rules i [] = []
-find' rules i goals = do 
-	let rules' = rename rules i 
-	(s,ruleUsed,goals') <- branch' rules' goals
-
-	case goals' of
-			[] -> [(s,ruleUsed)]
-			(x:xs) -> do
-				solution <- find' rules (i+1) goals'
-				[(s,ruleUsed),solution]
-
-branch' :: [Clause] -> [Term] -> [(Substitution,Clause,[Term])]
-branch' rules g@(goal:goals) = do 
-	rule@(head :- body) <- rules
-	s<- maybeToList $ unify goal head
-	return $(s::Substitution,rule, apply s (body ++ goals))
-
-
-
-
-
-renamef (f,f') bk = everywhere (mkT renameFunc) bk
-	where
-		renameFunc (Function n x)
-			| n==f  	= (Function f' x)
-		renameFunc x 			= x
 
 f = Function
 v x = Var x 0 
@@ -156,43 +47,50 @@ observed =  	[ (f"i" [a"a",a"b",a"innert"])
 		, (f"i" [a"d",a"c",a"attract"])
 		, (f"i" [a"b",a"d",a"innert"])
 		, (f"i" [a"b",a"c",a"attract"])
+		, (f"i" [a"e",a"a",a"innert"])
+		, (f"i" [a"e",a"b",a"attract"])
+		, (f"i" [a"e",a"d",a"attract"])
+		, (f"i" [a"e",a"c",a"attract"])
 --		, (f"i" [a"d",a"e",a"attract"])
 --		, (f"i" [a"b",a"e",a"attract"])
 --		, (f"i" [a"e",a"c",a"attract"])
 --		, (f"i" [a"e",a"a",a"innert"])
 		]
-objects = ["a","b","c","d"]--,"e"]
+objects = ["a","b","c","d","e"]
 
 type Node = ([Clause],[Clause])
 
-{-
 main = do
---	let 	erds =  [0,0.25,0.75,1]::[Double]
---		bufs =  [0,3,6] :: [Int]
---	outs <- mapM (\(buffersize,erd) -> do {writeIORef counter 0; out <-  mainish buffersize erd ;return (buffersize,erd,out)}) [(buffersize,erd)| buffersize <- bufs  , erd<- erds]
-	[arg1,arg2] <- getArgs
-	let	buffersize = read arg1 ::Int
-		erd = read arg2 ::Double
-	out <- sequence $ replicate 100 $ mainish buffersize erd 
-	let averag =  (fromIntegral $ sum out) / (fromIntegral $ length out)
-	putStrLn.show $ averag
-	return averag
--}
-
---mainish buffersize erd = do
-
-main = do
-	[arg1,arg2] <- getArgs
-	let	buffersize = read arg1 ::Int
-		erd = read arg2 ::Double
+	let	buffersizes = [1,2,3,4,5] ::[Int]
+		erds = reverse [0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1] ::[Double]
+		temps = [0..10]	:: [Double]
 	
-	sequence $ replicate 1000 $ mainsb buffersize erd
+	--out<-sequence $ replicate 10 $ mainsb buffersize erd
+	--print "FINAL AVERAGE"
+	--print $  (fromIntegral $ sum out ) / (fromIntegral$ length out)
+	let datapoint buffersize erd basket = sequence $ do 
+		temp <- temps
+		return $ forkIO $  mainsb buffersize erd temp basket
+	let murder children = mapM_ killThread children
+	sequence $ do 	
+		erd <- erds
+		buffersize <- buffersizes
+		return $ forkIO $ do
+			basket <- newEmptyMVar
+			print $"Running: " ++  (show buffersize) ++ " " ++ (show erd)  	
+			children <- datapoint buffersize erd basket
+			result <- takeMVar basket	
+			murder children
+			print result
+			submit $ show result
+	
 
-mainsb buffersize erd=  do
+
+mainsb buffersize erd temp basket =  do
 --	traceIO.show$ (buffersize,erd)
-	writeIORef counter 0
+	--if temp == 5 then putMVar basket (0,0,0,0) else return ()
+	counter <- newIORef  0
 	let 	numParticles = 3
-		temp = 2
 		initseed = ( [], [ f"t" [a o , a"o"]:-[]| o<-objects])
 		notEmpty x = do
 					x' <- readIORef x
@@ -202,17 +100,18 @@ mainsb buffersize erd=  do
 	history <- newIORef []
 	let	notConverged = do
 					ns' <- readIORef nodula
-					return $not $ any (\x-> (likelihood' observed x)  == 1 ) ns' 
+					return $not $ any (\x-> (likelihood observed x)  == 1 ) ns' 
 	whileM_ (notConverged) $ do
 		c <- readIORef counter
+		--print c
 		writeIORef counter c   
-		i' <- readIORef i
-		let observation  = tick$ observed !! i'
+		tick counter
+		buffer <- runRVar (Data.Random.Extras.sample (maximum [1,buffersize]) observed) StdRandom
+		observation <- runRVar (choice buffer) StdRandom
 		--traceIO $ "OBSERVAITON: "  ++ (show observation)
 		modifyIORef history $ \h -> nub (observation:h) 
 		herstory <- readIORef history
-		buffer <- runRVar (Data.Random.Extras.sample (maximum [1,buffersize]) observed) StdRandom
-		modifyIORef i $ \i-> mod (i + 1) (length observed)
+		modifyIORef i (+1)
 		nodula' <- readIORef nodula
 	 	progenium <- liftM concat $ forM nodula' $ \ nodulus -> do	
 				tier2 erd nodulus observation 
@@ -225,17 +124,20 @@ mainsb buffersize erd=  do
 									acc = if e' > e then 1 else 0 
 						survivors = map (\(a,a') -> acceptancerule a a')  allofthat
 					
-					
+					writeIORef nodula survivors
+					tick counter	
 					writeIORef nodula survivors
 				else do
 					flipper <- sequence $ replicate numParticles $ runRVar (sample StdUniform) StdRandom :: IO [Double]
 					let   	allofthat = (zip3 nodula' progenium flipper)
-						acceptancerule a a' flipper  = if a==a' || flipper < acc then a' else a 
-								where	e  = log $posterior buffer a
-									e'  = log $posterior buffer a'
-									acc = if e' > e then 1 else exp ( ( e'  - e) / temp ) 
+						acceptancerule a a' flipper  = if a==a' || flipper < (  acc) then a' else a 
+								where	e  = posterior buffer a
+									e'  =posterior buffer a'
+									acc = if e' > e then 1 else exp ( (  e'  - e) / temp ) 
 						survivors = map (\(a,a',acc) -> acceptancerule a a' acc )  allofthat
 					--print$ survivors
+					--print$ progenium
+					sequence$ replicate  numParticles (tick counter)
 					writeIORef nodula survivors
 	ns' <- readIORef nodula
 	hs' <- readIORef history
@@ -243,8 +145,7 @@ mainsb buffersize erd=  do
 	--NtraceIO  "\n\nWINNERS!! \n\n"
 	--traceIO.show $filter (accounts' hs') ns'
 	c<-readIORef counter :: IO Int
-	submit $ show (c,buffersize,erd)
-	return c
+	putMVar basket (c,buffersize,erd,temp)
 
 extractor obs@(Function "i" [Function o1 [] , Function o2 [], Function i []])= (o1,o2,i)
 extracteur (Function "i" [_ , _ , Function i []]:- [Function "t" [_,Function t1 _ ], Function "t" [_,Function t2 _]])= (t1,t2,i)
@@ -382,9 +283,9 @@ rethe :: Node -> [Term] -> IO Node
 rethe nodulus@(theory,tt) history = do
         let     interactions    = nub$ [i | (_,_,i) <- (map extractor history)]
                 types           = nub "o":[t| (Function _ [_,Function t _]:-[]) <- tt]
+	tt' <- refine objects tt
         theery <- runRVar (Data.Random.shuffle theory) StdRandom
         theory' <- geo theery interactions types
-	tt' <- refine objects tt
         return $ (theory',tt')
 
 geo:: [Clause] -> [String] -> [String] -> IO [Clause]
@@ -556,7 +457,6 @@ removeobj objs types = filter ctch types
 
 posterior history node@(theory,typetheory)  = (likelihood history node) * (prior node)
 
-posterior' history node@(theory,typetheory)  = (likelihood' history node) * (prior node)
 
 likelihood history node  = exp $ (-1) * b * fracwrong
 	where 	b = pb 
@@ -564,43 +464,26 @@ likelihood history node  = exp $ (-1) * b * fracwrong
 		totalwrong = fromIntegral $ (length observed) - (sum bl) :: Double
 		fracwrong = totalwrong / (fromIntegral $ length history )
 	
-likelihood' history node  = exp $ (-1) * b * fracwrong
-	where 	b = pb
-		bl = evalhistory' observed node
-		totalwrong = fromIntegral $ (length observed) - (sum bl) :: Double
-		fracwrong = totalwrong / (fromIntegral $ length history)
-		
 		
 prior::Node->Double
 prior node@(_,tt) = exp$ -1*(fromIntegral $ (sizeoftheory node) )  
 
 sizeoftheory node@(theory,typetheory) = (length $ theory) 
 
-myeval' node@(theory,tt)  obs@(Function "i" [Function o1 [] , Function o2 [], Function i []])=let
+myeval  node@(theory,tt)  obs@(Function "i" [Function o1 [] , Function o2 [], Function i []])=let
 		(s,rs) = prover (theory++tt) [f"i"[a o1,a o2,v"I"]]
 		rule = head rs
 		in case lookup (v"I") s of
 			(Just (Function inter _)) -> if i == inter then 1 else 0
 			otherwise 		  ->  0
 
-myeval::Node -> Term -> Int	
-myeval node@(theory,tt)  obs@(Function "i" [Function o1 [] , Function o2 [], Function i []])=let
-		(s,rs) = prover (theory++tt) [f"i"[a o1,a o2,v"I"]]
-		rule = head rs
-		in tick $ case lookup (v"I") s of
-			(Just (Function inter _)) -> if i == inter then 1 else 0
-			otherwise 		  ->  0
-
 
 accounts obs nodulus = (length obs) ==((sum.evalhistory obs) nodulus)
-accounts' obs nodulus = (length obs) ==((sum.evalhistory' obs) nodulus)
 
 evalhistory :: [Term] -> Node -> [Int]
 evalhistory history node@( theory, assignments) = correctness
 			where 	correctness = map (myeval node) history 
 
-evalhistory' history node@( theory, assignments) = correctness
-			where 	correctness = map (myeval' node) history 
 
 refine :: [String] -> [Clause] -> IO [Clause]
 refine objs typeTheory = do
