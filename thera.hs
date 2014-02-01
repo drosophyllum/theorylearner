@@ -187,6 +187,7 @@ main = do
 		erd = read arg2 ::Double
 	
 	sequence $ replicate 100 $ mainsb buffersize erd
+
 mainsb buffersize erd=  do
 --	traceIO.show$ (buffersize,erd)
 	writeIORef counter 0
@@ -234,7 +235,7 @@ mainsb buffersize erd=  do
 									e'  = log $posterior buffer a'
 									acc = if e' > e then 1 else exp ( ( e'  - e) / temp ) 
 						survivors = map (\(a,a',acc) -> acceptancerule a a' acc )  allofthat
-					print$ survivors
+					--print$ survivors
 					writeIORef nodula survivors
 	ns' <- readIORef nodula
 	hs' <- readIORef history
