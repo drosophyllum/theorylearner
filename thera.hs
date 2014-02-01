@@ -62,7 +62,7 @@ type Node = ([Clause],[Clause])
 
 main = do
 	let	buffersizes = [1,2,3,4,5] ::[Int]
-		erds = reverse [0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1] ::[Double]
+		erds = reverse [0,0.2,0.4,0.6,0.8,1]
 		temps = [0..10]	:: [Double]
 	
 	--out<-sequence $ replicate 10 $ mainsb buffersize erd
@@ -72,25 +72,40 @@ main = do
 		temp <- temps
 		return $ forkIO $  mainsb buffersize erd temp basket
 	let murder children = mapM_ killThread children
-	sequence $ do 	
-		erd <- erds
-		buffersize <- buffersizes
-		return $ forkIO $ do
-			basket <- newEmptyMVar
-			print $"Running: " ++  (show buffersize) ++ " " ++ (show erd)  	
-			children <- datapoint buffersize erd basket
-			result <- takeMVar basket	
-			murder children
-			print result
-			submit $ show result
-	
+	forM_ erds $ \erd -> do 
+		forM_ buffersizes $ \ buffersize ->  do
+			let gather = do 
+				basket <- newEmptyMVar
+				print $"Running: " ++  (show buffersize) ++ " " ++ (show erd)  	
+				children <- datapoint buffersize erd basket
+				result <- takeMVar basket	
+				murder children
+				print result
+				--submit $ show result
+				return result
+			runs <- (sequence.(replicate 5)) gather
+			let 	thrd = (\(x,y,z,a) -> a)
+				besttemp =  (sum $ map thrd runs)/ (fromIntegral $ length $ map thrd runs)
+			let datacollect = do
+				basket <- newEmptyMVar
+				print $"DATACOLLECT!: " ++  (show buffersize) ++ " " ++ (show erd)  	
+				children <- sequence.(replicate 20).forkIO $  mainsb buffersize erd besttemp basket
+				result <- takeMVar basket	
+				murder children
+				print result
+				submit $ show result
+				return result
+			sequence.(replicate 20 )$  datacollect
+
+				
+	forever $ return ()	
 
 
 mainsb buffersize erd temp basket =  do
 --	traceIO.show$ (buffersize,erd)
 	--if temp == 5 then putMVar basket (0,0,0,0) else return ()
 	counter <- newIORef  0
-	let 	numParticles = 3
+	let 	numParticles = 5
 		initseed = ( [], [ f"t" [a o , a"o"]:-[]| o<-objects])
 		notEmpty x = do
 					x' <- readIORef x
